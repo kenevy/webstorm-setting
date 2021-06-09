@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="description" content="">
+    <meta name="author" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Potree Viewer</title>
+
+    <link rel="stylesheet" type="text/css" href="./libs/potree/potree.css">
+    <link rel="stylesheet" type="text/css" href="./libs/jquery-ui/jquery-ui.min.css">
+    <link rel="stylesheet" type="text/css" href="./libs/perfect-scrollbar/css/perfect-scrollbar.css">
+    <link rel="stylesheet" type="text/css" href="./libs/openlayers3/ol.css">
+    <link rel="stylesheet" type="text/css" href="./libs/spectrum/spectrum.css">
+    <link rel="stylesheet" type="text/css" href="./libs/jstree/themes/mixed/style.css">
+</head>
+
+<body>
+    <script src="./libs/jquery/jquery-3.1.1.min.js"></script>
+    <script src="./libs/spectrum/spectrum.js"></script>
+    <script src="./libs/perfect-scrollbar/js/perfect-scrollbar.jquery.js"></script>
+    <script src="./libs/jquery-ui/jquery-ui.min.js"></script>
+    <script src="./libs/three.js/build/three.min.js"></script>
+    <script src="./libs/other/BinaryHeap.js"></script>
+    <script src="./libs/tween/tween.min.js"></script>
+    <script src="./libs/d3/d3.js"></script>
+    <script src="./libs/proj4/proj4.js"></script>
+    <script src="./libs/openlayers3/ol.js"></script>
+    <script src="./libs/i18next/i18next.js"></script>
+    <script src="./libs/jstree/jstree.js"></script>
+    <script src="./libs/potree/potree.js"></script>
+    <script src="./libs/plasio/js/laslaz.js"></script>
+    <script src="./libs/other/OBJLoader.js"></script>
+    <script src="./libs/other/MTLLoader.js"></script>
+    <script src="./libs/other/OBJMTLLoader.js"></script>
+    <script src="./libs/other/PLYLoader.js"></script>
+    <script src="./libs/other/ColladaLoader.js"></script>
+    <script src="./libs/other/OrbitControls.js"></script>
+    <script src="./libs/other/stats.js"></script>
+    <script src="./libs/MeshLine/src/THREE.MeshLine.js"></script>
+    <script src="./libs/shapefile/shapefile.js"></script>
+    <script src="./libs/cowa_3DModul.js"></script>
+    <script src="./libs/cowa_drawroad.js"></script>
+    <script src="./libs/cowa_menu.js"></script>
+
+    <!-- INCLUDE ADDITIONAL DEPENDENCIES HERE -->
+    <!-- INCLUDE SETTINGS HERE -->
+
+    <div class="potree_container" style="position: absolute; width: 100%; height: 100%; left: 0px; top: 0px; ">
+        <div id="potree_render_area"></div>
+        <div id="potree_sidebar_container"> </div>
+    </div>
+
+    <script>
+
+        window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
+
+        viewer.setEDLEnabled(false);
+        viewer.setFOV(60);
+        viewer.setPointBudget(1 * 1000 * 1000);
+        viewer.setBackground('skybox');
+        viewer.useHQ = "hq";
+        // < !--INCLUDE SETTINGS HERE-- >
+        viewer.loadSettingsFromURL();
+        var menu;
+        viewer.loadGUI(() => {
+            viewer.setLanguage('en');
+            $("#menu_appearance").next().show();
+            $("#menu_tools").next().show();
+            $("#menu_scene").next().show();
+            //viewer.toggleSidebar();
+            menu = new Menu();
+            // cowa = viewer.scene.scene.getObjectByName('cowa-1');
+
+            for (let i = 0; i < moduls.length; i++) {
+                menu.addMenu(g_carlistID, moduls[i].name, moduls[i].id, "");
+                console.log(moduls[i].name)
+            }
+        });
+
+        var auto_fllow = true;
+        var g_modul;
+        var moduls = [];
+        var lines_path = "http://" + window.location.host + "/dynamic/lines.json";
+        var pointcloud_path = "http://" + window.location.host + "/dynamic/cloud.js";
+        //var pointcloud_path = "./cowa1/cloud.js";
+
+        var modul_path = "./libs/18c.dae";
+        var distance = 15;
+        var g_postion;
+
+        var g_material;
+        var g_carlistID;
+        function read_point() {
+            var url = lines_path;
+            let pos;
+
+            $.ajax({
+                url: url,
+                async: false,
+                // type: "GET",//请求方式为get
+                dataType: "json", //返回数据格式为json
+                success: function (result) {
+                    pos = result;
+                }
+            })
+            return pos;
+        };
+
+        function set_position(modul, pos, rot, radius) {
+            modul.setposition(pos, rot);
+            if (auto_fllow && modul.name == g_modul.name) {
+                viewer.scene.view.position.set(pos.x + radius * Math.sin(rot.z),
+                    pos.y - radius * Math.cos(rot.z), radius);
+                viewer.scene.view.lookAt(pos);
+            } else if (modul.name == g_modul.name) {
+                viewer.scene.view.position.set(pos.x + g_postion.x,
+                    pos.y + g_postion.y, pos.z + g_postion.z);
+                viewer.scene.view.lookAt(pos);
+            }
+        }
+        function ToEulerAngles(r) {
+            sinr_cosp = 2 * (r.qw * r.qx + r.qy * r.qz);
+            cosr_cosp = 1 - 2 * (r.qx * r.qx + r.qy * r.qy);
+            roll = Math.atan2(sinr_cosp, cosr_cosp);
+
+            // pitch (y-axis rotation)
+            sinp = 2 * (r.qw * r.qy - r.qz * r.qx);
+            if (Math.abs(sinp) >= 1)
+                pitch = Math.copysign(Math.PI / 2, sinp); // use 90 degrees if out of range
+            else
+                pitch = Math.asin(sinp);
+
+            // yaw (z-axis rotation)
+            siny_cosp = 2 * (r.qw * r.qz + r.qx * r.qy);
+            cosy_cosp = 1 - 2 * (r.qy * r.qy + r.qz * r.qz);
+            yaw = Math.atan2(siny_cosp, cosy_cosp);
+
+            return new THREE.Vector3(roll, pitch, yaw - 0.5 * Math.PI);
+
+        }
+
+        // < !--INCLUDE POINTCLOUD-- >
+        Potree.loadPointCloud(pointcloud_path, "cowa", function (e) {
+            viewer.scene.addPointCloud(e.pointcloud);
+            let material = e.pointcloud.material;
+            let pointcloud = e.pointcloud;
+            g_material = material;
+            if (pointcloud.projection == '')
+                pointcloud.projection = "+proj=utm +zone=51 +ellps=WGS84 +datum=WGS84 +no_defs"
+
+            // material.size = 1;
+            // material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+            // material.pointColorType = Potree.PointColorType.POINT_INDEX;
+            material.pointColorType = Potree.PointColorType.INTENSITY;;
+            material.intensityRange = [0, 10];
+            // material.gradient = Potree.Gradients["GRAYSCALE"];
+            material.gradient = Potree.Gradients["RAINBOW"];
+            material.intensityBrightness = -0.2;
+
+            viewer.fitToScreen();
+            animate();
+            // 打开一个 web socket
+            // var ws = new WebSocket("ws://172.16.1.105:9998/echo");
+            let socket = new WebSocket("ws://" + window.location.host + "/websocket")
+            socket.onopen = function (event) {
+                setInterval(function() {
+                    socket.send(JSON.stringify({type: 'ADC'}))
+                }, 200) 
+            }
+            socket.onmessage = function (event) {
+                js = JSON.parse(event.data)
+                // console.log(js)
+                if(js == null || !js.hasOwnProperty('ADC')) return;
+                
+                js = js.ADC
+                for (let i = 0; i < js.length; i++) {
+
+                    let modul = viewer.scene.scene.getObjectByName(js[i].id);
+                    if (modul != null) {
+
+                        p = js[i]
+                        var position = new THREE.Vector3(p.x, p.y, p.z);
+                        var rotation = ToEulerAngles(p);
+
+                        set_position(moduls[i].modul, position, rotation, Math.abs(distance));
+                    } else {
+                        var creat_modul = new COWA3DModul(modul_path, js[i].id);
+                        creat_modul.init(viewer.scene.scene,
+                            pointcloud.position,
+                            pointcloud.rotation,
+                            0.0015)
+                        g_modul = viewer.scene.scene.getObjectByName(js[i].id);
+
+                        moduls.push({ name: creat_modul.name, id: moduls.length, modul: creat_modul });
+                        menu.addMenu(g_carlistID, creat_modul.name, creat_modul.id, "");
+                        console.log(moduls[i].name)
+
+                    }
+                }
+
+
+            };
+
+
+
+            /********************绘制车道线*****************************/
+            var road = new COWADrawroad(pointcloud)
+            data = read_point();
+
+            if (data)
+                setDescription('date: ' + data.header.date + '<br><br>' + 'projection: ' +
+                    data.header.projection.proj + '<br><br>' + 'version: ' +
+                    data.header.version);
+            road.draw_road(viewer.scene, data)
+
+           
+            function animate() {
+                requestAnimationFrame(animate);
+                render();
+            }
+            function render() {
+                distance = viewer.scene.view.position.z;
+                if (g_modul) {
+                    cowa = viewer.scene.scene.getObjectByName(g_modul.name);
+                    if (cowa) {
+                        var z = viewer.scene.view.position.z - cowa.children[2].position.z;
+                        var x = viewer.scene.view.position.x - cowa.children[2].position.x;
+                        var y = viewer.scene.view.position.y - cowa.children[2].position.y;
+
+                        g_postion = new THREE.Vector3(x, y, z);
+                    }
+                       
+                }
+            }
+        });
+
+
+    </script>
+
+
+</body>
+
+</html>
+
+
+<!-- ./PotreeConverter -i ../../../build-host/downsample.pointmap -o ../../../src/tools/PotreeConver/PotreeConverter/resources/pointclouds/cowa1 - -->
